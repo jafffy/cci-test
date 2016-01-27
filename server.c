@@ -5,6 +5,7 @@
 #include <assert.h>
 
 #include <cci.h>
+#include <pthread.h>
 
 #include "protocol.h"
 
@@ -14,6 +15,7 @@ cci_os_handle_t *ep_fd = NULL;
 cci_connection_t *connection = NULL;
 int accept = 1;
 int done = 0;
+pthread_t _polling_thread_id;
 
 static void error_handling(int errcode, const char* funcname)
 {
@@ -54,14 +56,10 @@ static void recv_callback(cci_event_t *event)
 	memset(buf, 0, 8192);
 	memcpy(buf, event->recv.ptr, len);
 	fprintf(stderr, "client: %s\n", buf);
-
-	ret = cci_send(connection, buf, len, (void*)Send, 0);
-	error_handling(ret, "cci_send");
 }
 
 static void send_callback(cci_event_t *event)
 {
-	assert(event->send.context == (void*)Send);
 	assert(event->send.connection == connection);
 	assert(event->send.connection->context == (void*)Accept);
 }
@@ -83,7 +81,7 @@ static void accept_callback(cci_event_t *event)
 	connection = event->accept.connection;
 }
 
-static void do_server()
+static void* polling_thread(void* args)
 {
 	int ret;
 
@@ -118,6 +116,25 @@ static void do_server()
 		}
 
 		cci_return_event(event);
+	}
+
+	pthread_exit(NULL);
+}
+
+static void do_server()
+{
+	int ret;
+	int transaction_id = 0xdeadbeaf;
+
+	pthread_create(&_polling_thread_id, NULL, polling_thread, NULL);
+
+	while (!done) {
+		char msg[BUFSIZ];
+		scanf("%s", msg);
+
+		ret = cci_send(connection, msg, (int32_t)strlen(msg),
+				(void*)(uintptr_t)transaction_id++, 0);
+		error_handling(ret, "cci_send");
 	}
 }
 
