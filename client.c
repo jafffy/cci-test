@@ -5,15 +5,10 @@
 #include <assert.h>
 
 #include <cci.h>
+#include <pthread.h>
 
 #include "protocol.h"
 
-// XXX This is test purpose
-int iters = 10;
-int send_done = 0;
-int recv_done = 0;
-static int i = 0;
-char buffer[8192];
 cci_conn_attribute_t attr = CCI_CONN_ATTR_RO;
 
 // Basic setting for CCI
@@ -27,6 +22,10 @@ int done = 0;
 const uint32_t timeout = 30 * 1000000;
 char *server_uri = NULL;
 int flags = 0;
+static unsigned _client_id = 0xdeadbeef;
+static pthread_t _polling_thread_id;
+
+char buffer[8192];
 
 static void error_handling(int errcode, const char* funcname)
 {
@@ -81,20 +80,8 @@ static void parse_opts(int argc, char** argv)
 
 static void send_callback(cci_event_t *event)
 {
-	fprintf(stderr, "send %d completed with %d\n",
-			(int)((uintptr_t) event->send.context),
-			event->send.status);
-
-	assert(event->send.context == (void*)(uintptr_t)i);
-	i++;
-	assert(event->send.connection == connection);
-	assert(event->send.connection->context == (void*)Connect);
-
-	if (done == 0) {
-		send_done++;
-	} else if (done == 1) {
-		done = 2;
-	}
+	// unused
+	(void) event;
 }
 
 static void recv_callback(cci_event_t *event)
@@ -102,33 +89,36 @@ static void recv_callback(cci_event_t *event)
 	int len = event->recv.len;
 
 	assert(event->recv.connection == connection);
-	assert(event->recv.connection->context == (void*)Connect);
+	assert(event->recv.connection->context == (void*)(uintptr_t)_client_id);
 
 	memcpy(buffer, event->recv.ptr, len);
 	buffer[len] = '\0';
-	fprintf(stderr, "received \"%s\"\n", buffer);
-
-	recv_done++;
+	fprintf(stderr, "server: %s\n", buffer);
 }
 
 static void connect_callback(cci_event_t *event)
 {
-	done = 1;
-
 	assert(event->connect.connection != NULL);
-	assert(event->connect.connection->context == (void*)Connect);
+	assert(event->connect.connection->context == (void*)(uintptr_t)_client_id);
 
 	connection = event->connect.connection;
 }
 
-static void
-poll_events()
+static void* polling_thread(void* args)
 {
 	int ret;
 	cci_event_t *event;
 
-	ret = cci_get_event(endpoint, &event);
-	if (ret == CCI_SUCCESS && event) {
+	while (!done) {
+		ret = cci_get_event(endpoint, &event);
+		if (ret != CCI_SUCCESS) {
+			if (ret != CCI_EAGAIN) {
+				error_handling(ret, "cci_get_event");
+			}
+
+			continue;
+		}
+
 		switch (event->type) {
 		case CCI_EVENT_SEND:
 			send_callback(event);
@@ -142,60 +132,39 @@ poll_events()
 		default:
 			fprintf(stderr, "ignoring event type %d\n",
 					event->type);
+			break;
 		}
 
 		cci_return_event(event);
-
-		if (done == 0 && send_done == iters && recv_done == iters) {
-			done = 1;
-		}
 	}
+
+	pthread_exit(NULL);
 }
 
 static void do_client()
 {
 	int ret;
 	int i;
+	int transaction_id = 0xbeafbeaf;
+	const int k_quit_message_id = 0xcbbccbcb;
+
+	pthread_create(&_polling_thread_id, NULL, polling_thread, NULL);
 
 	while (!done) {
-		poll_events();
-	}
+		char msg[BUFSIZ];
+		scanf("%s", msg);
 
-	if (!connection) {
-		exit(0);
-	}
+		if (strcmp(msg, "quit") == 0) {
+			ret = cci_send(connection, "bye", 3, (void*)(uintptr_t) k_quit_message_id, flags);
+			error_handling(ret, "bye - cci_send");
 
-	done = 0;
-
-	for (i = 0; i < iters; ++i) {
-		char data[128];
-
-		memset(data, 0, sizeof(data));
-		sprintf(data, "%4d", i);
-		sprintf(data + 4, "Hello World!");
-		
-		ret = cci_send(connection, data, (int32_t) strlen(data) + 4,
-				(void*)(uintptr_t)i, flags);
-		error_handling(ret, "cci_send");
-
-		if (flags & CCI_FLAG_BLOCKING) {
-			fprintf(stderr, "send %d completed with %d\n", i, ret);
+			done = 1;
+			break;
 		}
-	}
 
-	while (!done) {
-		poll_events();
-	}
-
-	ret = cci_send(connection, "bye", 3, (void*)(uintptr_t) iters, flags);
-	error_handling(ret, "bye - cci_send");
-
-	if (flags & CCI_FLAG_BLOCKING) {
-		done = 2;
-	}
-
-	while (done != 2) {
-		poll_events();
+		ret = cci_send(connection, msg, (int32_t) strlen(msg),
+				(void*)(uintptr_t)transaction_id++, flags);
+		error_handling(ret, "cci_send");
 	}
 }
 
@@ -211,8 +180,8 @@ int main(int argc, char** argv)
 
 	parse_opts(argc, argv);
 
-	ret = cci_connect(endpoint, server_uri, "Hello World!", 12,
-			attr, (void*)Connect, 0, NULL);
+	ret = cci_connect(endpoint, server_uri, "connect", 7,
+			attr, (void*)(uintptr_t)_client_id, 0, NULL);
 	error_handling(ret, "cci_connect");
 
 	do_client();

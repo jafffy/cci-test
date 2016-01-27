@@ -41,11 +41,7 @@ static void recv_callback(cci_event_t *event)
 {
 	int ret;
 	char buf[8192];
-	char *data = "data:";
-	int offset = 0;
 	int len = event->recv.len;
-
-	printf("recv\n");
 
 	assert(event->recv.connection == connection);
 	assert(event->recv.connection->context == (void*)Accept);
@@ -56,20 +52,15 @@ static void recv_callback(cci_event_t *event)
 	}
 
 	memset(buf, 0, 8192);
-	offset = strlen(data);
-	memcpy(buf, data, offset);
-	memcpy(buf + offset, event->recv.ptr, len);
-	offset += len;
-	fprintf(stderr, "recv'd \"%s\"\n", buf);
+	memcpy(buf, event->recv.ptr, len);
+	fprintf(stderr, "client: %s\n", buf);
 
-	ret = cci_send(connection, buf, offset, (void*)Send, 0);
+	ret = cci_send(connection, buf, len, (void*)Send, 0);
 	error_handling(ret, "cci_send");
 }
 
 static void send_callback(cci_event_t *event)
 {
-	fprintf(stderr, "completed send\n");
-
 	assert(event->send.context == (void*)Send);
 	assert(event->send.connection == connection);
 	assert(event->send.connection->context == (void*)Accept);
@@ -77,7 +68,6 @@ static void send_callback(cci_event_t *event)
 
 static void connect_request_callback(cci_event_t *event)
 {
-	printf("connect_request\n");
 	if (accept) {
 		cci_accept(event, (void*)Accept);
 	} else {
@@ -87,8 +77,6 @@ static void connect_request_callback(cci_event_t *event)
 
 static void accept_callback(cci_event_t *event)
 {
-	fprintf(stderr, "completed accept\n");
-
 	assert(event->accept.connection != NULL);
 	assert(event->accept.connection->context == (void*)Accept);
 	
