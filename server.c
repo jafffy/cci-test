@@ -48,13 +48,52 @@ static void recv_callback(cci_event_t *event)
 	assert(event->recv.connection == connection);
 	assert(event->recv.connection->context == (void*)Accept);
 
-	if (len == 3) {
+	memset(buf, 0, 8192);
+	memcpy(buf, event->recv.ptr, len);
+
+	if (strncmp(buf, "quit", strlen("quit")) == 0) {
 		done = 1;
 		return;
 	}
 
-	memset(buf, 0, 8192);
-	memcpy(buf, event->recv.ptr, len);
+	enum PacketTypes type;
+	memcpy(&type, buf, sizeof(enum PacketTypes));
+
+	if (TOUCH == type) {
+		char filename[4096];
+		int len;
+
+		parse_touch((struct packet_touch*)buf,
+				filename, &len);
+
+		filename[len] = '\0';
+
+		FILE* fp = fopen(filename, "wt");
+		fclose(fp);
+	}
+
+   	if (strncmp(buf, "touch", strlen("touch")) == 0) {
+		char operand[8192];
+		sscanf(buf + strlen("touch"), "%s", operand);
+
+		FILE* fp = fopen(operand, "wt");
+		fclose(fp);
+	} else if (strncmp(buf, "write", strlen("write")) == 0) {
+		char filename[8192], data[8192];
+		int offset, size;
+
+		sscanf(buf + strlen("write"), "%s %d %d %s", filename, &offset, &size, data);
+
+		FILE* fp = fopen(filename, "wt");
+		fseek(fp, offset, SEEK_SET);
+		int n_items = fwrite(data, size, 1, fp);
+		fclose(fp);
+
+		sprintf(data, "fwrite return value: %d", n_items);
+
+		cci_send(connection, data, strlen(data), 0, 0);
+	}
+
 	fprintf(stderr, "client: %s\n", buf);
 }
 
@@ -130,7 +169,7 @@ static void do_server()
 
 	while (!done) {
 		char msg[BUFSIZ];
-		scanf("%s", msg);
+		fgets(msg, BUFSIZ, stdin);
 
 		ret = cci_send(connection, msg, (int32_t)strlen(msg),
 				(void*)(uintptr_t)transaction_id++, 0);
