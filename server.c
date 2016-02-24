@@ -72,13 +72,7 @@ static void recv_callback(cci_event_t *event)
 		fclose(fp);
 	}
 
-   	if (strncmp(buf, "touch", strlen("touch")) == 0) {
-		char operand[8192];
-		sscanf(buf + strlen("touch"), "%s", operand);
-
-		FILE* fp = fopen(operand, "wt");
-		fclose(fp);
-	} else if (strncmp(buf, "write", strlen("write")) == 0) {
+   	if (strncmp(buf, "write", strlen("write")) == 0) {
 		char filename[8192], data[8192];
 		int offset, size;
 
