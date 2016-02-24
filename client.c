@@ -152,10 +152,10 @@ static void do_client()
 
 	while (!done) {
 		char msg[BUFSIZ];
-		scanf("%s", msg);
+		fgets(msg, BUFSIZ, stdin);
 
-		if (strcmp(msg, "quit") == 0) {
-			ret = cci_send(connection, "bye", 3, (void*)(uintptr_t) k_quit_message_id, flags);
+		if (strncmp(msg, "quit", strlen("quit")) == 0) {
+			ret = cci_send(connection, "quit", 4, (void*)(uintptr_t) k_quit_message_id, flags);
 			error_handling(ret, "bye - cci_send");
 
 			done = 1;
